@@ -3,7 +3,7 @@
 
 A population of small neural networks learns to play a Flappy-style game **from scratch** with a **genetic algorithm**. No backpropagation, no ML libraries, no build step: a single HTML file in vanilla JavaScript.
 
-**▶ Live demo:** `https://clampgod1.github.io/neuroflap/`
+**▶ Live demo:** https://clampgod1.github.io/neuroflap/
 
 ![screenshot](screenshot.png)
 

@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NeuroFlap — Neuroevolution in the Browser</title>
+<style>
+:root{--bg:#0f1115;--panel:#171a21;--line:#262b36;--text:#e6e8ee;--muted:#8a91a3;--accent:#6ee7b7;--accent2:#f59e0b;--neg:#f87171;--pos:#60a5fa}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{padding:20px 24px 4px;max-width:1240px;margin:0 auto}
+h1{margin:0;font-size:22px;letter-spacing:.2px}
+h1 span{color:var(--accent)}
+header p{margin:4px 0 0;color:var(--muted);max-width:760px}
+main{max-width:1240px;margin:0 auto;padding:16px 24px 32px;display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+canvas{display:block;width:100%;border-radius:8px}
+#game{aspect-ratio:8/5;background:#0b0d11;cursor:pointer}
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-top:12px}
+.stat{background:#0f1218;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.stat b{display:block;font-size:18px;font-variant-numeric:tabular-nums}
+.stat small{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.6px}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin:0 0 10px;font-weight:600}
+.side{display:flex;flex-direction:column;gap:16px}
+label{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;margin:10px 0 4px}
+label output{color:var(--text);font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+button{background:#222733;color:var(--text);border:1px solid var(--line);border-radius:7px;padding:7px 11px;font:inherit;font-size:13px;cursor:pointer}
+button:hover{border-color:#3a4150}
+button.primary{background:var(--accent);color:#06281d;border-color:transparent;font-weight:600}
+button.on{outline:2px solid var(--accent);outline-offset:1px}
+.note{color:var(--muted);font-size:12px;margin:10px 0 0}
+#net{aspect-ratio:4/3}
+#chart{aspect-ratio:16/9;margin-top:12px}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--muted);margin-top:6px}
+.legend i{display:inline-block;width:12px;height:3px;margin-right:5px;vertical-align:middle;border-radius:2px}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#222733;border:1px solid var(--line);color:var(--text);padding:9px 14px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none}
+#toast.show{opacity:1}
+.mode{font-size:12px;color:var(--accent);margin-left:8px;font-weight:500}
+@media(max-width:920px){main{grid-template-columns:1fr}.stats{grid-template-columns:repeat(3,1fr)}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Neuro<span>Flap</span><span class="mode" id="modeLabel">· evolving</span></h1>
+  <p>A population of small neural networks learns to play a Flappy-style game from scratch using a genetic algorithm — no backprop, no libraries, everything runs in your browser.</p>
+</header>
+<main>
+  <section>
+    <div class="card">
+      <canvas id="game"></canvas>
+      <div class="stats">
+        <div class="stat"><small>Generation</small><b id="sGen">1</b></div>
+        <div class="stat"><small>Alive</small><b id="sAlive">0</b></div>
+        <div class="stat"><small>Score</small><b id="sScore">0</b></div>
+        <div class="stat"><small>Best ever</small><b id="sBest">0</b></div>
+        <div class="stat"><small>Steps / frame</small><b id="sSpeed">1×</b></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h2>Learning curve</h2>
+      <canvas id="chart"></canvas>
+      <div class="legend"><span><i style="background:var(--accent)"></i>best score per generation</span><span><i style="background:var(--accent2)"></i>population average</span></div>
+    </div>
+  </section>
+  <aside class="side">
+    <div class="card">
+      <h2>Leader's brain (live)</h2>
+      <canvas id="net"></canvas>
+      <p class="note">Blue = positive weight, red = negative. Node brightness shows the current activation. Output &gt; 0.5 → flap.</p>
+    </div>
+    <div class="card">
+      <h2>Controls</h2>
+      <label>Simulation speed <output id="oSpeed">1×</output></label>
+      <input id="speed" type="range" min="1" max="100" value="1">
+      <label>Population size <output id="oPop">200</output></label>
+      <input id="pop" type="range" min="10" max="500" step="10" value="200">
+      <label>Mutation rate <output id="oMut">0.10</output></label>
+      <input id="mut" type="range" min="0.01" max="0.5" step="0.01" value="0.1">
+      <label>Hidden neurons <output id="oHid">8</output></label>
+      <input id="hid" type="range" min="2" max="16" value="8">
+      <div class="btns">
+        <button class="primary" id="bPause">Pause</button>
+        <button id="bReset">Reset</button>
+        <button id="bShow">Watch best</button>
+        <button id="bHuman">You play</button>
+        <button id="bExport">Export brain</button>
+        <button id="bImport">Import brain</button>
+        <input id="file" type="file" accept="application/json" hidden>
+      </div>
+      <p class="note">Population and mutation apply from the next generation; hidden neurons restart training. In “You play” mode press Space or click.</p>
+    </div>
+  </aside>
+</main>
+<div id="toast"></div>
+<script>
+"use strict";
+// ---------- config ----------
+const W = 800, H = 500;
+const GRAV = 0.45, FLAP = -7.5, MAXV = 10;
+const BIRD_X = 140, R = 11;
+const PIPE_W = 64, GAP = 150, SPACING = 270, SPEED = 3.2;
+const SCORE_CAP = 500; // a generation that reaches this has mastered the game
+const INPUT_LABELS = ["y", "vy", "dx", "Δtop", "Δbot"];
+
+// ---------- utils ----------
+function gauss() { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+const $ = id => document.getElementById(id);
+let toastT; function toast(t) { const el = $("toast"); el.textContent = t; el.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove("show"), 2600); }
+
+// ---------- neural network ----------
+class NN {
+  constructor(sizes, w) { this.sizes = sizes; this.w = w || NN.random(sizes); this.acts = []; }
+  static random(sizes) {
+    const w = [];
+    for (let l = 0; l < sizes.length - 1; l++) {
+      const n = sizes[l] + 1, m = sizes[l + 1], a = new Float32Array(n * m);
+      for (let i = 0; i < a.length; i++) a[i] = gauss() / Math.sqrt(n) * 1.5;
+      w.push(a);
+    }
+    return w;
+  }
+  forward(x) {
+    let a = x; this.acts = [x];
+    for (let l = 0; l < this.w.length; l++) {
+      const n = this.sizes[l], m = this.sizes[l + 1], Wl = this.w[l], out = new Array(m), last = l === this.w.length - 1;
+      for (let j = 0; j < m; j++) {
+        const o = j * (n + 1); let s = Wl[o + n];
+        for (let i = 0; i < n; i++) s += a[i] * Wl[o + i];
+        out[j] = last ? 1 / (1 + Math.exp(-s)) : Math.tanh(s);
+      }
+      a = out; this.acts.push(out);
+    }
+    return a;
+  }
+  clone() { return new NN(this.sizes.slice(), this.w.map(a => Float32Array.from(a))); }
+  static crossover(p, q) { return new NN(p.sizes.slice(), p.w.map((a, l) => a.map((v, i) => Math.random() < 0.5 ? v : q.w[l][i]))); }
+  mutate(rate, strength = 0.5) {
+    for (const a of this.w) for (let i = 0; i < a.length; i++) if (Math.random() < rate) a[i] += gauss() * strength;
+    return this;
+  }
+  toJSON() { return { sizes: this.sizes, weights: this.w.map(a => Array.from(a)) }; }
+  static fromJSON(o) { return new NN(o.sizes, o.weights.map(a => Float32Array.from(a))); }
+}
+
+// ---------- state ----------
+const S = {
+  mode: "evolve", paused: false, gen: 1, birds: [], pipes: [], score: 0, frame: 0,
+  best: 0, bestBrain: null, history: [],
+  popSize: 200, mutRate: 0.1, hidden: 8, speed: 1,
+};
+
+function newBird(brain) { return { y: H / 2, vy: 0, alive: true, frames: 0, score: 0, fitness: 0, brain }; }
+
+function resetWorld() {
+  S.pipes = []; S.score = 0; S.frame = 0;
+  spawnPipe(W + 40);
+}
+function spawnPipe(x) { S.pipes.push({ x, top: 60 + Math.random() * (H - 120 - GAP), passed: false }); }
+
+function startTraining() {
+  S.mode = "evolve"; S.gen = 1; S.best = 0; S.bestBrain = null; S.history = [];
+  const sizes = [5, S.hidden, 1];
+  S.birds = Array.from({ length: S.popSize }, () => newBird(new NN(sizes)));
+  resetWorld(); updateModeUI();
+}
+
+function nextPipe() {
+  for (const p of S.pipes) if (p.x + PIPE_W > BIRD_X - R) return p;
+  return S.pipes[0];
+}
+
+function inputs(b, p) {
+  return [
+    b.y / H * 2 - 1,
+    b.vy / MAXV,
+    (p.x + PIPE_W - BIRD_X) / W,
+    (p.top - b.y) / H,
+    (p.top + GAP - b.y) / H,
+  ];
+}
+
+function kill(b, p) {
+  b.alive = false; b.score = S.score;
+  const gapMid = p.top + GAP / 2;
+  b.fitness = b.frames + S.score * 150 + (1 - Math.abs(b.y - gapMid) / H) * 30;
+}
+
+function step() {
+  const p = nextPipe();
+  let alive = 0;
+  for (const b of S.birds) {
+    if (!b.alive) continue;
+    if (b.brain && b.brain.forward(inputs(b, p))[0] > 0.5) b.vy = FLAP;
+    if (b.flapQueued) { b.vy = FLAP; b.flapQueued = false; }
+    b.vy = Math.min(MAXV, b.vy + GRAV);
+    b.y += b.vy; b.frames++;
+    const hitPipe = BIRD_X + R > p.x && BIRD_X - R < p.x + PIPE_W && (b.y - R < p.top || b.y + R > p.top + GAP);
+    if (b.y - R < 0 || b.y + R > H || hitPipe) kill(b, p); else alive++;
+  }
+  for (const q of S.pipes) {
+    q.x -= SPEED;
+    if (!q.passed && q.x + PIPE_W < BIRD_X - R) { q.passed = true; S.score++; }
+  }
+  if (S.pipes.length && S.pipes[0].x + PIPE_W < 0) S.pipes.shift();
+  if (S.pipes[S.pipes.length - 1].x < W - SPACING) spawnPipe(W);
+  S.frame++;
+
+  if (S.mode === "evolve" && S.score >= SCORE_CAP) { for (const b of S.birds) if (b.alive) kill(b, p); alive = 0; }
+  if (alive === 0) endRound();
+}
+
+function tournament(pop, k = 3) {
+  let best = null;
+  for (let i = 0; i < k; i++) { const c = pop[(Math.random() * pop.length) | 0]; if (!best || c.fitness > best.fitness) best = c; }
+  return best;
+}
+
+function endRound() {
+  if (S.mode === "human") { S.awaitRestart = true; return; }
+  if (S.mode === "showcase") { S.birds = [newBird(S.bestBrain.clone())]; resetWorld(); return; }
+
+  const pop = S.birds.slice().sort((a, b) => b.fitness - a.fitness);
+  const genBest = pop[0].score;
+  const avg = pop.reduce((s, b) => s + b.score, 0) / pop.length;
+  S.history.push({ best: genBest, avg });
+  if (genBest >= S.best || !S.bestBrain) { S.best = Math.max(S.best, genBest); S.bestBrain = pop[0].brain.clone(); }
+
+  const next = [];
+  const elites = Math.max(1, Math.round(S.popSize * 0.02));
+  for (let i = 0; i < elites && i < pop.length; i++) next.push(newBird(pop[i].brain.clone()));
+  while (next.length < S.popSize) {
+    const a = tournament(pop), b = tournament(pop);
+    next.push(newBird(NN.crossover(a.brain, b.brain).mutate(S.mutRate)));
+  }
+  S.birds = next; S.gen++;
+  resetWorld(); drawChart();
+}
+
+// ---------- rendering ----------
+const game = $("game"); game.width = W; game.height = H;
+const g = game.getContext("2d");
+
+function drawGame() {
+  const grd = g.createLinearGradient(0, 0, 0, H);
+  grd.addColorStop(0, "#111827"); grd.addColorStop(1, "#0b0d11");
+  g.fillStyle = grd; g.fillRect(0, 0, W, H);
+  // parallax dots
+  g.fillStyle = "rgba(255,255,255,.05)";
+  for (let i = 0; i < 40; i++) { const x = ((i * 137 - S.frame * 0.6) % W + W) % W, y = (i * 89) % H; g.fillRect(x, y, 2, 2); }
+  // pipes
+  for (const p of S.pipes) {
+    g.fillStyle = "#1f3b33"; g.strokeStyle = "#6ee7b7"; g.lineWidth = 2;
+    g.fillRect(p.x, -2, PIPE_W, p.top + 2); g.strokeRect(p.x, -2, PIPE_W, p.top + 2);
+    g.fillRect(p.x, p.top + GAP, PIPE_W, H - p.top - GAP + 2); g.strokeRect(p.x, p.top + GAP, PIPE_W, H - p.top - GAP + 2);
+  }
+  // birds
+  const lead = leader();
+  for (const b of S.birds) {
+    if (!b.alive || b === lead) continue;
+    g.fillStyle = "rgba(245,158,11,.28)";
+    g.beginPath(); g.arc(BIRD_X, b.y, R, 0, Math.PI * 2); g.fill();
+  }
+  if (lead) {
+    g.fillStyle = S.mode === "human" ? "#60a5fa" : "#f59e0b";
+    g.beginPath(); g.arc(BIRD_X, lead.y, R, 0, Math.PI * 2); g.fill();
+    g.fillStyle = "#0b0d11"; g.beginPath(); g.arc(BIRD_X + 4, lead.y - 3, 2.5, 0, Math.PI * 2); g.fill();
+  }
+  // score
+  g.fillStyle = "rgba(230,232,238,.9)"; g.font = "600 42px system-ui"; g.textAlign = "center";
+  g.fillText(S.score, W / 2, 64);
+  if (S.paused) overlay("Paused");
+  else if (S.mode === "human" && S.awaitRestart) overlay("Crashed — Space / click to retry");
+  else if (S.mode === "human" && S.frame === 0) overlay("Space / click to flap");
+}
+function overlay(t) {
+  g.fillStyle = "rgba(11,13,17,.6)"; g.fillRect(0, H / 2 - 36, W, 72);
+  g.fillStyle = "#e6e8ee"; g.font = "500 22px system-ui"; g.textAlign = "center"; g.fillText(t, W / 2, H / 2 + 8);
+}
+function leader() { return S.birds.find(b => b.alive) || null; }
+
+function fitCanvas(c) {
+  const r = c.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+  const w = Math.max(1, Math.round(r.width * d)), h = Math.max(1, Math.round(r.height * d));
+  if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+  const ctx = c.getContext("2d"); ctx.setTransform(d, 0, 0, d, 0, 0);
+  return [ctx, r.width, r.height];
+}
+
+function drawNet() {
+  const [ctx, w, h] = fitCanvas($("net"));
+  ctx.clearRect(0, 0, w, h);
+  const lead = leader();
+  const brain = lead && lead.brain ? lead.brain : S.bestBrain;
+  if (!brain) { ctx.fillStyle = "#8a91a3"; ctx.font = "13px system-ui"; ctx.textAlign = "center"; ctx.fillText("Human player — no network", w / 2, h / 2); return; }
+  const sizes = brain.sizes, padX = 44, padY = 16;
+  const pos = sizes.map((n, l) => Array.from({ length: n }, (_, i) => [
+    padX + (w - 2 * padX) * l / (sizes.length - 1),
+    padY + (h - 2 * padY) * (n === 1 ? 0.5 : i / (n - 1)),
+  ]));
+  for (let l = 0; l < brain.w.length; l++) {
+    const n = sizes[l], m = sizes[l + 1];
+    for (let j = 0; j < m; j++) for (let i = 0; i < n; i++) {
+      const v = brain.w[l][j * (n + 1) + i], a = Math.min(1, Math.abs(v) / 2);
+      ctx.strokeStyle = v > 0 ? `rgba(96,165,250,${0.1 + a * 0.8})` : `rgba(248,113,113,${0.1 + a * 0.8})`;
+      ctx.lineWidth = 0.5 + a * 2.5;
+      ctx.beginPath(); ctx.moveTo(...pos[l][i]); ctx.lineTo(...pos[l + 1][j]); ctx.stroke();
+    }
+  }
+  const acts = brain.acts.length ? brain.acts : sizes.map(n => new Array(n).fill(0));
+  pos.forEach((col, l) => col.forEach(([x, y], i) => {
+    let v = acts[l] ? acts[l][i] : 0;
+    const t = l === sizes.length - 1 ? v : (v + 1) / 2; // map to 0..1
+    const lum = Math.round(30 + Math.max(0, Math.min(1, t)) * 200);
+    ctx.fillStyle = `rgb(${lum},${lum},${Math.min(255, lum + 15)})`;
+    ctx.strokeStyle = "#0b0d11"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x, y, l === 1 ? 7 : 9, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#8a91a3"; ctx.font = "11px system-ui";
+    if (l === 0) { ctx.textAlign = "right"; ctx.fillText(INPUT_LABELS[i], x - 14, y + 4); }
+    if (l === sizes.length - 1) { ctx.textAlign = "left"; ctx.fillText(v > 0.5 ? "FLAP" : "flap", x + 14, y + 4); }
+  }));
+}
+
+function drawChart() {
+  const [ctx, w, h] = fitCanvas($("chart"));
+  ctx.clearRect(0, 0, w, h);
+  const hist = S.history, pl = 34, pr = 10, pt = 10, pb = 22;
+  const maxY = Math.max(5, ...hist.map(d => d.best));
+  ctx.strokeStyle = "#262b36"; ctx.fillStyle = "#8a91a3"; ctx.font = "11px system-ui"; ctx.lineWidth = 1;
+  for (let k = 0; k <= 4; k++) {
+    const y = pt + (h - pt - pb) * (1 - k / 4);
+    ctx.beginPath(); ctx.moveTo(pl, y); ctx.lineTo(w - pr, y); ctx.stroke();
+    ctx.textAlign = "right"; ctx.fillText(Math.round(maxY * k / 4), pl - 6, y + 4);
+  }
+  ctx.textAlign = "center"; ctx.fillText("generation", (pl + w - pr) / 2, h - 5);
+  if (hist.length < 1) return;
+  const X = i => pl + (w - pl - pr) * (hist.length === 1 ? 0.5 : i / (hist.length - 1));
+  const Y = v => pt + (h - pt - pb) * (1 - v / maxY);
+  for (const [key, col] of [["avg", "#f59e0b"], ["best", "#6ee7b7"]]) {
+    ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath();
+    hist.forEach((d, i) => i ? ctx.lineTo(X(i), Y(d[key])) : ctx.moveTo(X(i), Y(d[key])));
+    ctx.stroke();
+  }
+}
+
+function updateStats() {
+  $("sGen").textContent = S.mode === "evolve" ? S.gen : "—";
+  $("sAlive").textContent = S.birds.filter(b => b.alive).length;
+  $("sScore").textContent = S.score;
+  $("sBest").textContent = Math.max(S.best, S.mode === "evolve" ? S.score : 0);
+  $("sSpeed").textContent = (S.mode === "human" ? 1 : S.speed) + "×";
+}
+
+function updateModeUI() {
+  $("modeLabel").textContent = { evolve: "· evolving", showcase: "· watching best brain", human: "· you play" }[S.mode];
+  $("bShow").classList.toggle("on", S.mode === "showcase");
+  $("bHuman").classList.toggle("on", S.mode === "human");
+  $("bPause").textContent = S.paused ? "Resume" : "Pause";
+}
+
+// ---------- loop ----------
+function loop() {
+  if (!S.paused && !(S.mode === "human" && (S.awaitRestart || S.frame === 0 && !S.started))) {
+    const n = S.mode === "human" ? 1 : S.speed;
+    for (let i = 0; i < n; i++) { step(); if (S.mode === "human" && S.awaitRestart) break; }
+  }
+  drawGame(); drawNet(); updateStats();
+  requestAnimationFrame(loop);
+}
+
+// ---------- controls ----------
+function bindRange(id, out, fmt, fn) {
+  const el = $(id), o = $(out);
+  const upd = () => { o.textContent = fmt(+el.value); fn(+el.value); };
+  el.addEventListener("input", upd); upd();
+}
+bindRange("speed", "oSpeed", v => v + "×", v => S.speed = v);
+bindRange("pop", "oPop", v => v, v => S.popSize = v);
+bindRange("mut", "oMut", v => v.toFixed(2), v => S.mutRate = v);
+$("hid").addEventListener("input", e => { $("oHid").textContent = e.target.value; });
+$("hid").addEventListener("change", e => { S.hidden = +e.target.value; startTraining(); drawChart(); });
+
+$("bPause").onclick = () => { S.paused = !S.paused; updateModeUI(); };
+$("bReset").onclick = () => { S.paused = false; startTraining(); drawChart(); };
+
+// remember the training run so we can return to it after showcase / human mode
+let saved = null;
+function leaveTraining() { if (S.mode === "evolve") saved = { birds: S.birds, pipes: S.pipes, score: S.score, frame: S.frame }; }
+function backToTraining() {
+  S.mode = "evolve";
+  if (saved) { Object.assign(S, saved); saved = null; } else startTraining();
+  updateModeUI();
+}
+
+$("bShow").onclick = () => {
+  if (S.mode === "showcase") return backToTraining();
+  if (!S.bestBrain) { toast("No trained brain yet — let it evolve for a few generations first."); return; }
+  leaveTraining(); S.mode = "showcase"; S.paused = false;
+  S.birds = [newBird(S.bestBrain.clone())]; resetWorld(); updateModeUI();
+};
+$("bHuman").onclick = () => {
+  if (S.mode === "human") return backToTraining();
+  leaveTraining(); S.mode = "human"; S.paused = false; S.started = false; S.awaitRestart = false;
+  S.birds = [newBird(null)]; resetWorld(); updateModeUI();
+};
+function humanFlap() {
+  if (S.mode !== "human") return;
+  if (S.awaitRestart) { S.awaitRestart = false; S.started = false; S.birds = [newBird(null)]; resetWorld(); return; }
+  S.started = true;
+  const b = S.birds[0]; if (b && b.alive) b.flapQueued = true;
+}
+window.addEventListener("keydown", e => { if (e.code === "Space") { e.preventDefault(); humanFlap(); } });
+game.addEventListener("pointerdown", humanFlap);
+
+$("bExport").onclick = () => {
+  if (!S.bestBrain) { toast("Nothing to export yet."); return; }
+  const json = JSON.stringify({ score: S.best, generation: S.gen, brain: S.bestBrain.toJSON() });
+  try {
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+    a.download = `neuroflap-brain-score${S.best}.json`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  } catch (_) {}
+  navigator.clipboard.writeText(json).then(() => toast("Brain exported (JSON also copied to clipboard)"), () => toast("Brain exported as JSON"));
+};
+$("bImport").onclick = () => $("file").click();
+$("file").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const o = JSON.parse(await f.text());
+    S.bestBrain = NN.fromJSON(o.brain || o); S.best = o.score || 0;
+    leaveTraining(); S.mode = "showcase"; S.paused = false;
+    S.birds = [newBird(S.bestBrain.clone())]; resetWorld(); updateModeUI();
+  } catch (err) { toast("Could not read that file: " + err.message); }
+  e.target.value = "";
+};
+window.addEventListener("resize", drawChart);
+
+// expose for debugging / tests
+window.NeuroFlap = S;
+startTraining(); drawChart(); loop();
+</script>
+</body>
+</html>

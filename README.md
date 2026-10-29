@@ -1,4 +1,4 @@
-[README (2).md](https://github.com/user-attachments/files/34158343/README.2.md)
+
 # NeuroFlap — Neuroevolution in the Browser
 
 A population of small neural networks learns to play a Flappy-style game **from scratch** with a **genetic algorithm**. No backpropagation, no ML libraries, no build step: a single HTML file in vanilla JavaScript.
